@@ -1,0 +1,678 @@
+---
+title: "Graphing When Wolves Fish in Northern Minnesota"
+author: "Dani Freund"
+format: 
+  html:
+    theme: lux
+    embed-resources: TRUE
+echo: TRUE
+warning: FALSE
+error: FALSE
+editor: visual
+---
+
+## Rationale
+
+Visualize the time of day and time of year wolves are fishing in the Greater Voyageurs Ecosystem.
+
+#### Packages Needed
+
+```{r}
+library(readr) # for loading data
+library(tidyr) # for organizing data
+library(ggplot2) # for graphing
+library(lubridate) # for dates
+library(gridExtra)
+library(ggpubr)
+library(MetBrewer) # for color palletes 
+library(dplyr) # for cleaner analysis
+library(kableExtra) # for tables
+library(stringr)
+```
+
+## Location Data
+
+```{r}
+#| output: FALSE
+data<-readr::read_csv("/Users/danifreund/Desktop/fishing_data_code_for_publication/wolves_fishing/data/locations_by_fishing_period.csv", show_col_types = FALSE)
+
+# getting hour by itself
+# getting a time column hour:minute
+data$time <- format(as.POSIXct(data$date.LMT), format = "%H:%M")
+
+# getting just hour, have to use as.numeric for graphs to work
+data$hour <- format(as.POSIXct(data$date.LMT), format = "%H") %>% as.numeric() 
+
+# making sure data matches fishing periods
+data %>% subset(period=="during") %>% group_by(wolf) %>% summarize(start=min(date),end=max(date)) %>% kbl() %>% kable_material_dark(c("striped", "hover"))
+```
+
+## Remote Camera Data
+
+```{r}
+camera <- read.csv("/Users/danifreund/Desktop/fishing_data_code_for_publication/wolves_fishing/data/camera_trap.csv") %>% data.frame()
+
+# getting hour by itself
+# removing cameras that do not have times recorded 
+camera$First_Time<-ifelse(camera$First_Time=="", NA, camera$First_Time)
+camera$Last_Time<-ifelse(camera$Last_Time=="", NA, camera$Last_Time)
+camera<-camera[complete.cases(camera[, c("First_Time")]), ]
+
+# converting last date to date format
+# has to be right format in csv file first! 
+camera$Last_Date <- format(as.POSIXct(camera$Last_Date), format = "%Y-%m-%d")
+
+# combining date and time column because r is stupid and hates hours by themselves without dates
+camera$date<-as.POSIXct(paste(camera$Last_Date, camera$Last_Time), format="%Y-%m-%d %H:%M:%S")
+
+# getting just hour, have to use as.numeric for graphs to work
+camera$hour <- format(as.POSIXct(camera$date), format = "%H") %>% as.numeric() 
+
+# getting rid of V067's one video of wading in Irwin Creek in 2018
+camera <- subset(camera, !(Wolf_ID == "V067" & Tag_Type == "Globalstar"))
+
+# making sure data matches fishing periods
+camera %>% group_by(wolf=Wolf_ID, year=year(First_Date)) %>% summarize(start=min(First_Date),end=max(Last_Date)) %>% kbl() %>% kable_material_dark(c("striped", "hover"))
+```
+
+## Getting Data Ready to Graph
+
+```{r}
+# location data
+data_clean <- data %>% 
+  subset(period=="during") %>% 
+  select(date.LMT, wolf, buffer, hour)
+data_clean <- select(data_clean, wolf, hour, date.LMT, buffer)
+# renaming columns
+colnames(data_clean)<- c("wolf", "hour", "date.LMT", "Data")
+# changing 20 to 20m Collar Locations
+data_clean$Data<-gsub(20,"20m Collar Locations",as.character(data_clean$Data))
+# changing 500 to 500m Collar Locations
+data_clean$Data<-gsub(500,"500m Collar Locations",as.character(data_clean$Data))
+
+# camera data
+camera_clean <- camera %>% 
+  select(Wolf_ID, date, hour)
+# renaming columns
+colnames(camera_clean)<- c("wolf", "date.LMT", "hour")
+# adding camera column
+camera_clean$Data<-"Remote Camera"
+
+# combining data
+locs_camera<-rbind(data_clean,camera_clean)
+locs_camera$date<-date(locs_camera$date.LMT)
+
+# getting month 
+locs_camera$month <- month(locs_camera$date.LMT)
+
+# making a common year
+locs_camera$month.day <- as.Date(format(locs_camera$date.LMT, "2022-%m-%d"))
+```
+
+## Making the Graphs
+
+### Graphs with Droopy Ends for Reference
+
+#### 20m Hour Plot
+
+```{r}
+# creating color pallettes
+my_colors_noid <- met.brewer("Signac")[c(2,3,4,5,6,8,10,11,12,13,14)]
+my_colors <- met.brewer("Signac")[c(2,4,5,6,8,10,12,13,14)]
+
+camera_20m <- locs_camera %>% subset(Data == "Remote Camera"|Data== "20m Collar Locations")
+
+(plot.20mlocs.camera = (ggplot(camera_20m, aes(x = hour)) +
+              # density for all wolves together
+               geom_density(data=camera_20m, 
+                            aes(x=hour), 
+                            bw=2, 
+                            fill='dark gray', color='dark gray'))+
+                            # standardizing the smoothing factor
+                 # individual density plots for wolves
+                 geom_density(aes(color=factor(wolf)#,linetype=Data
+                                  ),
+                                  bw=2)+ labs(colour="Wolf ID")+
+                                  # standardizing the smoothing factor
+                # making the graph look pretty 
+                coord_cartesian(xlim=c(0, 24), ylim=c(0,0.2), expand=0) +
+                labs(x="Hour of Day", 
+                y=expression(atop("Density of 20 m Locations", 
+                             paste("and Camera Trap Events"),
+                     color="Wolf ID")))+
+                theme_classic() +
+                theme(axis.text=element_text(size=15), 
+                      axis.title = element_text(size=15),
+                      rect = element_rect(fill="transparent"),
+                      panel.background = element_rect(fill = "transparent"), 
+                  # Legend stuff 
+                 legend.title = element_text(size=15, face="bold"), 
+                 legend.text=element_text(size=15), 
+                 legend.position = "bottom", legend.box="vertical") +
+                  scale_color_manual(values = my_colors_noid))+
+                  # editing legend title
+                  guides(colour = guide_legend(nrow = 2, ncol = 11)) 
+```
+
+#### 20m Month Plot
+
+```{r}
+# making a common year
+(plot.20.month = (ggplot(camera_20m, aes(month.day))+
+                    geom_density(bw=5, fill='dark gray', color='dark gray')+
+                    geom_density(aes(color=wolf#, linetype=year
+                                     ), bw=5)) + 
+                    theme_classic()+
+                labs(x="Month", 
+                y=expression(atop("Density of 20 m Locations", 
+                                  paste("and Camera Trap Events"),
+                     color="Wolf ID")))+
+                      theme_classic() +
+    coord_cartesian(expand=0)+
+    scale_x_date(date_breaks="1 month", date_labels="%B",
+                 limits = c(as.Date("2022-03-20"), as.Date("2022-08-15")))+
+    scale_color_manual(values = my_colors_noid)+
+                theme(axis.text=element_text(size=15),
+                      #axis.text.x = element_text(angle=45,hjust=1),
+                      axis.title=element_text(size=15),
+                      rect = element_rect(fill="transparent"),
+                      panel.background = element_rect(fill = "transparent"))) 
+```
+
+#### 500m Hour Plot
+
+```{r}
+data.500 <- subset(locs_camera, locs_camera$Data=="500m Collar Locations")
+
+(plot.500 = (ggplot(data.500, aes(x = hour)) +
+              # density for all wolves together
+               geom_density(data=data.500, 
+                            aes(x=hour), 
+                            bw=2, 
+                            fill='dark gray', color='dark gray')+
+                              # standardizing the smoothing factor
+                
+                 # individual density plots for wolves
+                 geom_density(aes(color=factor(wolf)),
+                                  bw=2))+ 
+                              # standardizing the smoothing factor
+    
+                # making the graph look pretty 
+                coord_cartesian(xlim=c(0, 24), ylim=c(0,0.16), expand=0) +
+                labs(x="Hour of Day", 
+                     y="Density of 500 m Locations",
+                     color="Wolf ID")+
+                theme_classic()+
+                scale_color_manual(values = my_colors)+
+                theme(axis.text=element_text(size=15), 
+                      axis.title=element_text(size=15),
+                      rect = element_rect(fill="transparent"),
+                      panel.background = element_rect(fill = "transparent")))
+```
+
+#### 500m Month Plot
+
+```{r}
+# Get unique values in the "wolf" column
+unique_wolves <- unique(data.500$wolf)
+
+(plot.500.month = (ggplot(data.500, aes(month.day))+
+                    geom_density(fill='dark gray', color='dark gray', bw=5, 
+                    show.legend = TRUE)+
+                    geom_density(aes(color=wolf), bw=5, 
+                                 show.legend = TRUE)) + theme_classic() +
+                    labs(x="Month", 
+                    y="Density of 500 m Locations",
+                    color="Wolf ID") +
+                    coord_cartesian(expand=0)+
+                    scale_x_date(date_breaks="1 month", date_labels="%B",
+                    limits = c(as.Date("2022-03-20"), as.Date("2022-08-15")))+
+                    scale_color_manual(values = my_colors)+
+                    theme(axis.text=element_text(size=15),
+                          #axis.text.x = element_text(angle=45,hjust=1),
+                    axis.title=element_text(size=15),
+                    rect = element_rect(fill="transparent"),
+                      panel.background = element_rect(fill = "transparent")))
+```
+
+#### 
+
+```{r}
+#| echo: FALSE
+#| output: FALSE
+(final.plot<-ggpubr::ggarrange(plot.20mlocs.camera, plot.20.month, plot.500, plot.500.month, 
+            labels = c("a)","b)","c)","d)"),
+          ncol = 2, nrow = 2, align="v",
+          common.legend=TRUE, legend="bottom",
+          widths = 1,
+  heights = 1,
+  font.label = list(size = 10)))
+
+```
+
+## Tripling Data to Better Visualize Circularity of Time of Day Wolves Fished
+
+Tripling the data to create a circular histogram can help to approximate circular data, such as the time of day wolves fish. The time of year wolves fish is not best displayed as circular data in this case because we only observed wolves fishing in the spring and the data we used only included \~3 months of the year. Consequently, we do not want to visualize the entire year of wolf locations.
+
+We are not doing any statistics or even math with this data, we are just interested in visualizing the time of day and year that wolves fish. The graphs above show the data in it's raw form without tripling for reference. We can see from these graphs that wolves are fishing for the most part in the spring and at night. Our data set is small (n = 10 collared wolves, and an unknown number of uncolored wolves) so we are hesitant to do any statistics beyond observing the patterns presented here.
+
+### Tripling the Data
+
+```{r}
+#| output: FALSE
+# duplicating data so we can make a graph that is circular
+# data 24 hours and 12 months before 
+locs_camera_1 <- locs_camera
+locs_camera_1$hour <- locs_camera_1$hour-24
+locs_camera_1$month <- locs_camera_1$month-12
+ 
+# data 24 hours and 12 months after
+locs_camera_2 <- locs_camera
+locs_camera_2$hour <- locs_camera_2$hour+24
+locs_camera_2$month <- locs_camera_2$month+12
+
+# checking to make sure it worked
+hour.1 <- locs_camera_1$hour
+hour <- locs_camera$hour
+hour.2 <- locs_camera_2$hour
+hour.all<-cbind(hour.1, hour, hour.2) %>% data.frame()
+
+month.1 <- locs_camera_1$month
+month <- locs_camera$month
+month.2 <- locs_camera_2$month
+month.all<-cbind(month.1, month, month.2) %>% data.frame()
+
+# finding differences between
+hour.all$hour-hour.all$hour.1 # all = 24 = good
+hour.all$hour-hour.all$hour.2 # all = -12 = good
+month.all$month-month.all$month.1 # all = 12 = good
+month.all$month-month.all$month.2 # all = -12 = good
+
+# combining all data sets, should have 19290 rows
+locs_camera_all <- rbind(locs_camera, locs_camera_1, locs_camera_2)
+```
+
+### Graphs without Droopy Ends for Manuscript
+
+#### 20m Hour Plot
+
+```{r}
+# creating color pallettes
+my_colors_noid <- met.brewer("Signac")[c(2,3,4,5,6,8,10,11,12,13,14)]
+my_colors <- met.brewer("Signac")[c(2,4,5,6,8,10,12,13,14)]
+
+camera_20m <- locs_camera_all %>% subset(Data == "Remote Camera"|Data== "20m Collar Locations")
+
+(plot.20mlocs.camera = (ggplot(camera_20m, aes(x = hour)) +
+              # density for all wolves together
+               geom_density(data=camera_20m, 
+                            aes(x=hour), 
+                            bw=2, 
+                            fill='dark gray', color='dark gray'))+
+                            # standardizing the smoothing factor
+                 # individual density plots for wolves
+                 geom_density(aes(color=factor(wolf)#,linetype=Data
+                                  ),
+                                  bw=2)+ labs(colour="Wolf ID")+
+                                  # standardizing the smoothing factor
+                # making the graph look pretty 
+                coord_cartesian(xlim=c(0, 24), ylim=c(0,0.06), expand=0) +
+                labs(x="Hour of Day", 
+                y=expression(atop("Density of 20 m Locations", 
+                             paste("and Camera Trap Events"),
+                     color="Wolf ID")))+
+                theme_classic() +
+                theme(axis.text=element_text(size=15), 
+                      axis.title = element_text(size=15),
+                      rect = element_rect(fill="transparent"),
+                      panel.background = element_rect(fill = "transparent"), 
+                  # Legend stuff 
+                 legend.title = element_text(size=15, face="bold"), 
+                 legend.text=element_text(size=15), 
+                 legend.position = "bottom", legend.box="vertical") +
+                  scale_color_manual(values = my_colors_noid))+
+                  # editing legend title
+                  guides(colour = guide_legend(nrow = 2, ncol = 11)) 
+
+```
+
+#### 500m Hour Plot
+
+```{r}
+data.500 <- subset(locs_camera_all, locs_camera_all$Data=="500m Collar Locations")
+
+(plot.500 = (ggplot(data.500, aes(x = hour)) +
+              # density for all wolves together
+               geom_density(data=data.500, 
+                            aes(x=hour), 
+                            bw=2, 
+                            fill='dark gray', color='dark gray')+
+                              # standardizing the smoothing factor
+                 # individual density plots for wolves
+                 geom_density(aes(color=factor(wolf)),
+                                  bw=2))+ 
+                              # standardizing the smoothing factor
+                # making the graph look pretty 
+                coord_cartesian(xlim=c(0, 24), ylim=c(0,0.05), expand=0) +
+                labs(x="Hour of Day", 
+                     y="Density of 500 m Locations",
+                     color="Wolf ID")+
+                theme_classic()+
+                scale_color_manual(values = my_colors)+
+                theme(axis.text=element_text(size=15), 
+                      axis.title=element_text(size=15),
+                      rect = element_rect(fill="transparent"),
+                      panel.background = element_rect(fill = "transparent")))
+```
+
+```{r}
+#| echo: FALSE
+#| output: FALSE
+(final.plot<-ggpubr::ggarrange(plot.20mlocs.camera, plot.20.month, plot.500, plot.500.month, labels = c("a)","b)","c)","d)"),ncol = 2, nrow = 2, align="v",common.legend=TRUE, legend="bottom") )
+
+png("/Users/danifreund/Desktop/fishing_data_code_for_publication/wolves_fishing/output/final_plot.png", width=12, height=9, units="in", res=1000, bg="transparent")
+final.plot
+dev.off()
+```
+
+## Tallying Number of Locations for each Wolf within 500m and 20m Buffers
+
+```{r}
+table <- data %>% group_by(wolf,period,buffer) %>% 
+  summarize(n=n()) %>% 
+  pivot_wider(names_from = period, values_from = n) 
+table<-data.frame(table)
+table$sum <- (sum = rowSums(table[, c("after", "during", "before")], na.rm = TRUE)) 
+table <- table %>% mutate(percent.before = (before/sum)*100) %>% 
+  mutate(percent.during = (during/sum)*100) %>% 
+  mutate(percent.after = (after/sum)*100)
+
+table$percent.after <- round(c(table$percent.after), 0)
+table$percent.during <- round(c(table$percent.during), 0)
+table$percent.before <- round(c(table$percent.before), 0)
+
+#table %>% kbl(caption = "Percent locs out of locs within 20 and 500 buffers") %>% kable_material_dark(c("striped", "hover"))
+```
+
+```{r}
+# loading wolf locations
+all_locs <- read_csv(file = "/Users/danifreund/Desktop/fishing_data_code_for_publication/ethology_of_wolves_freshwater_fishing/data/all.locs.fishing.period.no.buffers.csv", show_col_types = FALSE)
+
+fishing_period <- read_csv(file="/Users/danifreund/Desktop/fishing_data_code_for_publication/ethology_of_wolves_freshwater_fishing/data/summary_fishing_periods_final.csv", show_col_types = FALSE)
+
+# clipping all locaitons to fishing period 
+fishing_period$start <- as.Date(fishing_period$start, format = "%m/%d/%y")
+fishing_period$end <- as.Date(fishing_period$end, format = "%m/%d/%y")
+fishing_period$start.before.fishing <- (fishing_period$start - fishing_period$length)
+fishing_period$end.after.fishing <- (fishing_period$end + fishing_period$length)
+
+all_locs <- all_locs %>%
+  inner_join(fishing_period, by = "wolf") %>%
+  filter(date >= start.before.fishing, date <= end.after.fishing)
+
+clipped.locs <- all_locs %>% group_by(wolf) %>% summarize(min.all.locs = min(date),max.all.locs = max(date))
+
+fishing_period <- merge(fishing_period, clipped.locs, by="wolf")
+
+# seeing if we have missing locs
+fishing_period$match.start <- ifelse(fishing_period$start.before.fishing ==  fishing_period$min.all.locs, "no missing locs", "missing locs")
+fishing_period$match.end <- ifelse(fishing_period$end.after.fishing ==  fishing_period$max.all.locs, "no missing locs", "missing locs")
+```
+
+```{r}
+# percent locs spent fishing 
+# calculating all locs put out before, during, and after the fishing period regardless of if they are in the buffer or not
+table.all.locs <- all_locs %>% group_by(wolf, period) %>% summarize(total=n()) %>% pivot_wider(names_from = period,
+              values_from = total)
+# re-naming to have all in title
+colnames(table.all.locs) <- c("wolf","all_after"
+                            ,"all_during","all_before")
+
+# calculating all locs put out before, during, and after the fishing period within buffers
+buffered.locs <- data %>% group_by(wolf,buffer,period) %>% summarize(n=n()) %>% 
+  pivot_wider(names_from = c(period,buffer),
+              values_from = n)
+# merging data frames
+table.1 <- merge(table.all.locs, buffered.locs, by = "wolf") 
+# dividing locs within buffers by all locs put out at that time
+table.1$percent.20.before <- (table.1$before_20/table.1$all_before)  
+table.1$percent.20.during <- (table.1$during_20/table.1$all_during) 
+table.1$percent.20.after <- (table.1$after_20/table.1$all_after)  
+table.1$percent.500.before <- (table.1$before_500/table.1$all_before)  
+table.1$percent.500.during <- (table.1$during_500/table.1$all_during) 
+table.1$percent.500.after <- (table.1$after_500/table.1$all_after)  
+# adding collar fix intervals
+table.1$collar.fix <-  ifelse(table.1$wolf == "V034" | table.1$wolf == "V060","12 hour","20 min")
+
+# rounding the values
+table.1 <- table.1 %>% mutate_at(vars(11:16), round, digits = 2) 
+# just selecting the percents
+table.1.percent <- (table.1[,c(1,11:17)])
+# pivoting longer 
+table.percent.long <- table.1.percent %>% pivot_longer(cols = 2:7,
+                                       names_to = "variable",
+                                       values_to = "value")  
+
+table.percent.long <- table.percent.long %>% tidyr::separate(variable, c('percent','Buffer',"Period"))
+
+# re-naming fishing periods
+table.percent.long$Period <- ifelse(table.percent.long$Period =="before", "Before Fishing Period", table.percent.long$Period)
+table.percent.long$Period <- ifelse(table.percent.long$Period =="during", "During Fishing Period", table.percent.long$Period)
+table.percent.long$Period <- ifelse(table.percent.long$Period =="after", "After Fishing Period", table.percent.long$Period)
+# calculating average
+average <- table.percent.long %>% group_by(Buffer,Period) %>% summarize(value = ((mean(value, na.rm=T))))
+# calculating sd
+sd <- table.percent.long %>%group_by(Buffer, Period) %>% summarize(sd = sd(value, na.rm=T))
+# merging data sets
+average <- merge(average, sd, by=c("Period","Buffer"))
+
+# making a wide version of the average data
+means <- colMeans(table.1.percent[,2:7], na.rm=T) 
+means <- data.frame(t(means))
+means$wolf <- "average"
+means$collar.fix <- NA
+sd_vals <- sapply(table.1.percent, sd, na.rm=T)
+sd_vals <- data.frame(t(sd_vals))
+sd_vals$wolf <- "SD"
+sd_vals$collar.fix <- NA
+table.1.percent.average <- rbind(table.1.percent, means)
+table.1.percent.average.sd <- rbind(table.1.percent.average, sd_vals)
+
+table.1.percent.average.sd[,2:7]<-round(table.1.percent.average.sd[,2:7] * 100, 2)
+
+table.1.percent.average.sd %>% kbl(caption = "Percent locs within buffers out of all locs before, during, and after fishing periods") %>% kable_material_dark(c("striped", "hover"))
+
+
+average.wide <- average %>% pivot_wider(names_from = c(Period,Buffer),
+              values_from = c(value, sd))
+
+```
+
+
+```{r}
+# hours spent fishing 
+# just selecting the counts
+table.1.count <- (table.1[,c(1:10,17)])
+# adding fishing period length
+fishing_period_days <- select(fishing_period, wolf, length)
+table.1.count <- merge(table.1.count, fishing_period_days, by = "wolf")
+
+# subsetting to just get 20 min interval wolves
+collar.20.min<-subset(table.1.count, table.1.count$collar.fix=="20 min")
+# calculating the hours
+# duplicating the data for 20 min
+collar.20.min.hours <- collar.20.min
+collar.20.min.hours[,2:10] <- collar.20.min.hours[,2:10]*20 # calculating min
+collar.20.min.hours[,2:10] <- collar.20.min.hours[,2:10]/60 # calculating hours
+collar.20.min.hours[,2:10] <- collar.20.min.hours[,2:10]/collar.20.min.hours$length # calculating the number of hours per day of the length of the fishing period
+
+# calculating mean
+means <- sapply(collar.20.min.hours, mean, na.rm=T)
+means <- data.frame(t(means))
+means$wolf <- "mean"
+# calculating sd
+sd_vals <- sapply(collar.20.min.hours, sd, na.rm=T)
+sd_vals <- data.frame(t(sd_vals))
+sd_vals$wolf <- "sd"
+collar.20.min.hours<-rbind(collar.20.min.hours,means,sd_vals)
+
+collar.20.min.hours[,c(2:10,12)]<-(round(collar.20.min.hours[,c(2:10,12)],2)) # rounding to have no decimal pionts
+
+# creating table
+collar.20.min.hours %>% select("Wolf ID" = wolf, 
+                              "GPS Collar" = collar.fix, 
+                              "Before w/in 20" = before_20, 
+                              "During w/in 20" = during_20, 
+                              "After w/in 20" = after_20, 
+                              "Before w/in 500" = before_500, 
+                              "During w/in 500" = during_500, 
+                              "After w/in 500" = after_500) %>% kbl(caption = "Hours spent fishing per day within buffers at fishing water sources") %>% kable_material_dark(c("striped", "hover"))
+```
+
+
+
+```{r}
+# graphing the data
+# proportion locs
+library(scales)
+# line graphs
+# subsetting the data
+buff.20<-subset(table.percent.long, table.percent.long$Buffer == 20)
+# Calculate the average value for each Period
+avg_values <- buff.20 %>%
+  group_by(Period) %>%
+  summarize(avg_value = mean(value, na.rm=T))
+# graphing the data
+buff.20 %>% ggplot(aes(x = factor(Period, 
+                                  levels = c("Before Fishing Period", 
+                                             "During Fishing Period", 
+                                             "After Fishing Period")), 
+                       y = value, 
+                       colour = wolf, 
+                       group=wolf,
+                       linetype = factor(collar.fix, 
+                                         levels = c("20 min", "12 hour")))) +
+  scale_y_continuous(labels = percent_format()) +
+  geom_line() + 
+  geom_point() + 
+  theme_classic() +
+  labs(x = "Time Period", 
+       y = "Percent of Locations within 20 m Buffer", colour = "Wolf ID") +
+  scale_linetype_manual(values = c(1, 2), 
+                        guide = 
+                          guide_legend(title = "GPS Collar Fix Interval")) 
+
+
+subset(average, Buffer==20) %>% ggplot(aes(x = factor(Period, 
+                                  levels = c("Before Fishing Period", 
+                                             "During Fishing Period", 
+                                             "After Fishing Period")), 
+                                           y = value)) + 
+  scale_y_continuous(labels = percent_format()) +
+  geom_line(aes(group=1)) + 
+  geom_point() +
+  theme_classic() +
+  geom_errorbar(aes(ymin= value - sd, ymax=value + sd), width = 0.2) +
+  labs(x = "Time Period", 
+       y = "Average Percent of Locations within 20 m Buffer", colour = "Average")
+                                                                       
+# 500 m graph
+buff.500<-subset(table.percent.long, table.percent.long$Buffer == 500)
+buff.500 %>% ggplot(aes(x = factor(Period, 
+                                  levels = c("Before Fishing Period", 
+                                             "During Fishing Period", 
+                                             "After Fishing Period")), 
+                       y = value, 
+                       colour = wolf, 
+                       group=wolf,
+                       linetype = factor(collar.fix, 
+                                         levels = c("20 min", "12 hour")))) +
+  scale_y_continuous(labels = percent_format()) +
+  geom_line() + 
+  geom_point() + 
+  theme_classic() +
+  labs(x = "Time Period", 
+       y = "Percent of Locations within 500 m Buffer",
+       colour = "Wolf ID") +
+  scale_linetype_manual(values = c(1, 2), 
+                        guide = guide_legend(title = "GPS Collar Fix Interval")) 
+
+subset(average, Buffer==500) %>% ggplot(aes(x = factor(Period, 
+                                  levels = c("Before Fishing Period", 
+                                             "During Fishing Period", 
+                                             "After Fishing Period")), 
+                                           y = value)) + 
+  scale_y_continuous(labels = percent_format()) +
+  geom_line(aes(group=1)) + 
+  geom_point() +
+  theme_classic() +
+  geom_errorbar(aes(ymin= value - sd, ymax=value + sd), width = 0.2) +
+  labs(x = "Time Period", 
+       y = "Average Percent of Locations within 500 m Buffer", colour = "Average")
+```
+
+
+```{r}
+# graphing hours for 20 min interval wolves
+library(scales)
+# line graphs
+# creating color pallettes
+my_colors <- c("#808080", met.brewer("Signac")[c(2,5,8,10,12,13,14)])
+
+# pivoting values longer
+collar.20.min.hours.select <- collar.20.min.hours[,c(1,5:10)]
+table.prop.hours.long <- collar.20.min.hours.select %>% pivot_longer(cols = 2:7,
+                                       names_to = "variable",
+                                       values_to = "value")
+
+# seperating labels
+table.prop.hours.long <- table.prop.hours.long %>% tidyr::separate(variable, c("Period",'Buffer'))
+
+# re-naming things
+table.prop.hours.long$Period <- ifelse(table.prop.hours.long$Period == "before", "Before Fishing Period", table.prop.hours.long$Period)
+table.prop.hours.long$Period <- ifelse(table.prop.hours.long$Period == "during", "During Fishing Period", table.prop.hours.long$Period)
+table.prop.hours.long$Period <- ifelse(table.prop.hours.long$Period == "after", "After Fishing Period", table.prop.hours.long$Period)
+
+
+# graphing the data
+# 20 m buffer
+subset(table.prop.hours.long, table.prop.hours.long$Buffer==20 &  
+         table.prop.hours.long$wolf!= "sd") %>% 
+  ggplot(aes(x = factor(Period, 
+                                  levels = c("Before Fishing Period", 
+                                             "During Fishing Period", 
+                                             "After Fishing Period")), 
+                       y = value, 
+                       colour = wolf, 
+                       group=wolf)) +
+  geom_line(aes(linetype = ifelse(wolf != "mean", "dotted", "solid"))) + 
+  geom_point() + 
+  scale_color_manual(values = my_colors) +
+  theme_classic() +
+  labs(x = "Time Period", 
+       y = "Hours Per Day Spent within 20 m of Fishing Water Source", colour = "Wolf ID") +
+  scale_linetype_manual(values = c(1, 2), 
+                        guide = 
+                          guide_legend(title = "Mean vs. Individual")) 
+
+# 500 m buffer
+subset(table.prop.hours.long, table.prop.hours.long$Buffer==500 &  
+         table.prop.hours.long$wolf!= "sd") %>% 
+  ggplot(aes(x = factor(Period, 
+                                  levels = c("Before Fishing Period", 
+                                             "During Fishing Period", 
+                                             "After Fishing Period")), 
+                       y = value, 
+                       colour = wolf, 
+                       group=wolf)) +
+  geom_line(aes(linetype = ifelse(wolf == "mean", "solid", "dotted"))) + 
+  geom_point() + 
+  theme_classic() +
+  scale_color_manual(values = my_colors) +
+  labs(x = "Time Period", 
+       y = "Hours Per Day Spent within 500 m of Fishing Water Source", colour = "Wolf ID") + scale_linetype_manual(values = c(1, 2), 
+                        guide = 
+                          guide_legend(title = "Mean vs. Individual"))  
+
+```
+

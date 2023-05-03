@@ -1,0 +1,287 @@
+---
+title: "Determining Fishing Periods for Wolves in Northern Minnesota"
+author: "Dani Freund"
+format: 
+  html:
+    theme: lux
+    embed-resources: TRUE
+echo: TRUE
+warning: FALSE
+error: FALSE
+editor: visual
+---
+
+## Rationale
+
+Figure out the period of time (first date to last date) wolves were observed fishing from 2017 to 2021 in the Greater Voyageurs Ecosystem, Northern Minnesota, USA. The fishing period is defined by wolf GPS cluster locations, remote camera video footage, and GPS camera collar footage and locations.
+
+#### Packages Needed
+
+```{r}
+library(readr) # for read_csv
+library(tidyr) # for data organization
+library(dplyr) # for data organization
+library(lubridate) # for dates
+library(rgdal) # for shapefiles
+library(ggplot2) # for plotting
+library(kableExtra) # for making tables
+```
+
+### Fishing Periods from Cluster Data
+
+```{r}
+# loading data
+library(here)
+clusters <- readr::read_csv("/Users/danifreund/Desktop/fishing_data_code_for_publication/wolves_fishing/data/all_wolves_clusters.csv", show_col_types = FALSE)
+
+# filter out fishing clusters
+clusters.fish=clusters[grepl("Fish|fish", clusters$Interpretation.of.Cluster, ignore.case=TRUE),]
+
+# finding what unique fishing labels there are 
+uniqie<-unique(clusters.fish$Interpretation.of.Cluster)
+
+# filtering out non-fishing clusters with the word "fish" in them
+clusters.fish.1=subset(clusters.fish, clusters.fish$Interpretation.of.Cluster == "Hunting and killing fish")
+clusters.fish.2=subset(clusters.fish, clusters.fish$Interpretation.of.Cluster == "Resting after fishing")
+
+# re-combining fish databases so only have clusters associated with fishing
+clusters.fish = rbind(clusters.fish.1, clusters.fish.2)
+clusters.fish = data.frame(clusters.fish)
+
+# converting dates to date format 
+clusters.fish$Date.of.First.Fix <- as.POSIXct(clusters.fish$Date.of.First.Fix, format = "%m/%d/%y")
+clusters.fish$Date.of.Last.Fix <- as.POSIXct(clusters.fish$Date.of.Last.Fix, format = "%m/%d/%y")
+
+# Finding beginning and end of fishing period
+summary.clusters<-clusters.fish %>% group_by(Wolf.ID) %>% summarize(min(Date.of.First.Fix), max(Date.of.Last.Fix))
+
+# re-naming columns
+colnames(summary.clusters) <- c("wolf","start","end")
+summary_clusters = mutate(summary.clusters, data="clusters")
+
+# adding river column
+river.names = c("ash river/black duck","irwin creek","irwin creek","daley creek","ash river","irwin creek")
+summary_clusters = mutate(summary_clusters, river=river.names)
+```
+
+### Fishing Periods from Remote Camera Data
+
+```{r}
+# loading data
+camera<-readr::read_csv("/Users/danifreund/Desktop/fishing_data_code_for_publication/wolves_fishing/data/camera_trap.csv", show_col_types = FALSE)
+
+# converting dates 
+camera$First_Date <- as.Date(as.POSIXct(camera$First_Date, format = "%m/%d/%y"))
+camera$Last_Date <- as.Date(as.POSIXct(camera$Last_Date, format = "%m/%d/%y"))
+
+# V034, V067, and Unknown wolves have some fishing videos that are not dated (May 1 2019 - May 25 2019)
+summary_camera <- camera %>%
+  # complete cases only chooses the rows that have times in them (no NA values)
+  subset(complete.cases(First_Time)) %>% 
+  group_by(wolf = Wolf_ID, year = year(First_Date)) %>% 
+  summarize(start = min(as.Date(First_Date)), 
+            end = max(as.Date(Last_Date)))
+
+# V067 only has 1 date in 2018 so filter that out to get 2019 fishing period
+summary_camera <- summary_camera[!(summary_camera$start=="2018-05-17"),] # deleting 2018 video for 
+
+# adding data type
+summary_camera = mutate(summary_camera, data="cameras")
+# adding river column
+summary_camera = mutate(summary_camera, river="irwin creek")
+# getting rid of year column
+summary_camera <- summary_camera[,c(1,3:6)]
+```
+
+### Fishing Periods from Camera Collar Data
+
+```{r}
+# loading data
+camera_collar=read_csv("/Users/danifreund/Desktop/fishing_data_code_for_publication/wolves_fishing/data/camera_collar.csv", show_col_types = FALSE)
+
+# filtering out rows related to fishing
+camera_collar_fish <- camera_collar[grepl("Fish|fish", camera_collar$Behavior, ignore.case=TRUE),] 
+
+# finding min and max dates
+summary_camera_collar <- camera_collar_fish %>% group_by(wolf=Wolf) %>%  summarize(start=min(date), end=max(date))
+
+# adding data type
+summary_camera_collar = mutate(summary_camera_collar, data="camera collar")
+summary_camera_collar = mutate(summary_camera_collar, river="ash river")
+
+```
+
+### Fishing GPS Locations 20m Buffer
+
+```{r}
+#| output: FALSE
+# loading wolf locations
+locations <- read_csv(file = "/Users/danifreund/Desktop/fishing_data_code_for_publication/wolves_fishing/data/all_wolves_locs.csv", show_col_types = FALSE)
+
+#loading 200m buffer shapefiles
+invisible({
+buff.Ash.River.20 <-readOGR(dsn="/Users/danifreund/Desktop/fishing_data_code_for_publication/wolves_fishing/data/waterway_buffers/ash_river_20m_buffer/AshRiverBuffer20Buffer.shp")
+buff.Irwin.Creek.20 <-readOGR(dsn="/Users/danifreund/Desktop/fishing_data_code_for_publication/wolves_fishing/data/waterway_buffers/irwin_creek_20m_buffer/IrwinCreek20Buffer.shp")
+buff.Daley.Creek.20 <-readOGR(dsn="/Users/danifreund/Desktop/fishing_data_code_for_publication/wolves_fishing/data/waterway_buffers/daley_creek_20m_buffer/daley.Creek.Buffer.20.shp")
+buff.Black.Duck.20 <- readOGR(dsn="/Users/danifreund/Desktop/fishing_data_code_for_publication/wolves_fishing/data/waterway_buffers/black_duck_river_20m_buffer/black.Duck.River.Buffer.20.shp")
+buff.Irwin.Creek.500 <- readOGR(dsn="/Users/danifreund/Desktop/fishing_data_code_for_publication/wolves_fishing/data/waterway_buffers/irwin_creek_500m_buffer/irwin.Creek.Buffer.500m.shp")})
+
+# filtering out V034 locations
+V034=filter(locations, wolf=="V034")
+
+#getting coordinates in correct system
+coordinates(locations) <- ~longitude.Deg + latitude.Deg #'WGS 84 LONGITUDE is before LATITUDE!!!!
+proj4string(locations) <- CRS("+init=epsg:4326")
+
+coordinates(V034) <- ~longitude.Deg + latitude.Deg #'WGS 84 LONGITUDE is before LATITUDE!!!!
+proj4string(V034) <- CRS("+init=epsg:4326")
+
+#making sure wolfLocs is in same CRS as buff.Irwin.Creek.20  
+locations<-spTransform(locations, CRS(proj4string(buff.Irwin.Creek.20))) # converts locations to UTM
+V034<-spTransform(V034, CRS(proj4string(buff.Irwin.Creek.20))) # converts locations to UTM
+
+#filtering locations
+locs.buff.ash.20<-locations[buff.Ash.River.20,]
+locs.buff.irwin.20<-locations[buff.Irwin.Creek.20,] #filtering all of the wolf locations in the buffer  
+locs.buff.daley.20<-locations[buff.Daley.Creek.20,]
+locs.buff.black.20<-locations[buff.Black.Duck.20,]
+locs.buff.irwin.500<-locations[buff.Irwin.Creek.500,]
+locs.buff.irwin.500.V034<-V034[buff.Irwin.Creek.500,]
+
+#plotting filtered locations and buffer to ensure filter worked
+#writing function
+plot1 = function(data,buffer){
+plot(data, col="red") #plotting wolf locations  
+plot(buffer, add=T) #plotting the buffer
+}
+```
+
+```{r}
+#applying function
+plot1(data=locs.buff.ash.20, buffer=buff.Ash.River.20)
+plot1(data=locs.buff.irwin.20, buffer=buff.Irwin.Creek.20)
+plot1(data=locs.buff.daley.20, buffer=buff.Daley.Creek.20)
+plot1(data=locs.buff.black.20, buffer=buff.Black.Duck.20)
+plot1(data=locs.buff.irwin.500, buffer=buff.Irwin.Creek.500)
+plot1(data=locs.buff.irwin.500.V034, buffer=buff.Irwin.Creek.500)
+
+#converting SPDF to df
+locs.buff.ash.20<-as.data.frame(locs.buff.ash.20) #converting to a df
+locs.buff.ash.20$date<-as.Date(locs.buff.ash.20$date)
+
+locs.buff.irwin.20<-as.data.frame(locs.buff.irwin.20) #converting to a df
+locs.buff.irwin.20$date<-as.Date(locs.buff.irwin.20$date)
+
+locs.buff.daley.20<-as.data.frame(locs.buff.daley.20) #converting to a df
+locs.buff.daley.20$date<-as.Date(locs.buff.daley.20$date)
+
+locs.buff.black.20<-as.data.frame(locs.buff.black.20) #converting to a df
+locs.buff.black.20$date<-as.Date(locs.buff.black.20$date)
+
+locs.buff.irwin.500<-as.data.frame(locs.buff.irwin.500) #converting to a df
+locs.buff.irwin.500$date<-as.Date(locs.buff.irwin.500$date)
+
+locs.buff.irwin.500.V034<-as.data.frame(locs.buff.irwin.500.V034) #converting to a df
+locs.buff.irwin.500.V034$date<-as.Date(locs.buff.irwin.500.V034$date)
+
+#use the tidyverse functions (specifically functions from dplyr package) to summarize data in a variety of ways
+summary=function(data){
+  tally<-data %>% group_by(wolf, date) %>% 
+  summarize(numberLocations = n()) #counts up the number of rows (i.e., locations). 
+  #"numberLocations" is the column name that the count data goes in
+  tally=filter(tally, numberLocations>=2) %>% 
+  summarize(start= min(date), #selects the earliest date
+              end = max(date), #selects the latest date
+              length = max(date)-min(date)+1)} #time between the two
+
+ash=summary(locs.buff.ash.20) 
+ash=mutate(ash, river="ash river")
+
+irwin=summary(locs.buff.irwin.20)
+irwin=mutate(irwin, river="irwin creek")
+
+daley=summary(locs.buff.daley.20)
+daley=mutate(daley, river="daley creek")
+
+black=summary(locs.buff.black.20)
+black=mutate(black, river="black duck")
+
+summary.locations=rbind(ash,irwin,daley,black)
+summary_locations=mutate(summary.locations, data="locations 20m buff")
+
+# re-ordering columns
+summary_locations<-select(summary_locations,wolf,start,end,data,river)
+```
+
+### Fishing GPS Locations 500m Buffer around Irwin Creek
+
+```{r}
+unique.1<-unique(locs.buff.irwin.500$wolf)
+
+# for all wolves
+summary.500<-
+  locs.buff.irwin.500 %>% group_by(wolf, year=year(date)) %>% 
+    summarize(start= min(date), #selects the earliest date
+              end = max(date) #selects the latest date
+              ) #time between the two
+              # need to do +1 to include all days and not just do difference
+
+# just for 12hr wolves
+col.12.summary=filter(summary.500, wolf=="V034" & year=="2017" | wolf=="V060")
+
+# V034 still has fishing period of 315 days... 
+locs.buff.irwin.500$month <- format(as.POSIXct(locs.buff.irwin.500$date), format = "%m")
+locs.buff.irwin.500$day <- format(as.POSIXct(locs.buff.irwin.500$date.LMT), format = "%d")
+V034.locs.500=subset(locs.buff.irwin.500, wolf=="V034"& year(date)=="2017") %>% subset(month=="04"|month=="05")
+V060.locs.500=filter(locs.buff.irwin.500, wolf=="V060")
+locs.500.V034.V060<-rbind(V034.locs.500,V060.locs.500)
+
+# summarizing 12hour locs
+summary_locs_12hr<-locs.500.V034.V060 %>% group_by(wolf) %>% summarize(start=min(date),end=max(date), data="locations 500m buff", river="irwin creek") 
+
+```
+
+### Summarizing Fishing Periods
+
+```{r}
+# combining fishing period
+summary_all <-rbind(summary_camera,summary_camera_collar,summary_clusters,summary_locations, summary_locs_12hr)
+
+# getting rid of time in date column
+summary_all$start <- date(summary_all$start)
+summary_all$end <- date(summary_all$end)
+
+# finding length of fishing period
+# add 1 to include both the final end day
+summary_all$length = (summary_all$end - summary_all$start) + 1
+
+# re-organizing columns
+summary <- select(summary_all, wolf, start, end, length, river, data)
+
+# filtering out fishing period
+O0C = filter(summary, wolf=="O0C") %>% filter(data=="clusters") # clusters 
+V034 = filter(summary, wolf=="V034") # want both 500m locs and cameras
+V046 = filter(summary, wolf=="V046") %>% filter(data=="clusters") # clusters
+V060 = filter(summary, wolf=="V060") %>% filter(data=="cameras") # cameras (on 12 hour locations)
+V062 = filter(summary, wolf=="V062") %>% filter(data=="clusters") # clusters
+V067 = filter(summary, wolf=="V067") %>% filter(data=="cameras") # cameras
+V071 = filter(summary, wolf=="V071") %>% filter(data=="clusters") # clusters
+V077 = filter(summary, wolf=="V077")  %>% filter(data=="clusters") # clusters
+V089 = filter(summary, wolf=="V089")  %>% filter(data=="camera collar") %>% filter(river== "ash river") # locations 
+V094 = filter(summary, wolf=="V094")  %>% filter(data=="clusters") # clusters
+unknown = filter(summary, wolf=="Unknown")
+summary_final = rbind(O0C, V034, V046, V060, V062, V067, V071, V077, V089, V094,unknown) 
+
+# replacing unknown with uncollared
+summary_final$wolf<-gsub("Unknown","Uncollared",as.character(summary_final$wolf))
+
+# average fishing period length
+mean(summary_final$length)
+# sd length of fishing period
+sd(summary_final$length)
+
+# making a nice table
+summary_final %>% kbl() %>% kable_material_dark(c("striped", "hover"))
+
+
+```

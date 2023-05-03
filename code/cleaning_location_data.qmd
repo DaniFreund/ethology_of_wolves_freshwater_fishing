@@ -1,0 +1,251 @@
+---
+title: "Cleaning Location Data of Wolves Fishing in Northern Minnesota"
+author: "Dani Freund"
+format: 
+  html:
+    theme: lux
+    embed-resources: TRUE
+echo: TRUE
+warning: FALSE
+error: FALSE
+editor: visual
+---
+
+## Analysis Notes
+
+-   don't have full season location data for some wolves
+
+-   O0C doesn't have an after fishing period
+
+-   V067 does not have any locations
+
+-   V034 does not have locations for 2019
+
+### Packages Needed
+
+```{r}
+library(readr) # for read_csv
+library(tidyr) # for data organization
+library(dplyr) # for data organization
+library(lubridate) # for dates
+library(rgdal) # for shapefiles
+library(ggplot2) # for plotting
+library(kableExtra) # for making tables
+```
+
+#### Loading Data
+
+```{r output = FALSE, warning = FALSE}
+locations = read.csv(file = "/Users/danifreund/Desktop/fishing_data_code_for_publication/wolves_fishing/data/all_wolves_locs.csv")
+
+fishing.periods = read.csv(file = "/Users/danifreund/Desktop/fishing_data_code_for_publication/wolves_fishing/data/summary_fishing_periods_final.csv")
+
+buff.Ash.2 <-readOGR(dsn="/Users/danifreund/Desktop/fishing_data_code_for_publication/wolves_fishing/data/waterway_buffers/ash_river_20m_buffer/AshRiverBuffer20Buffer.shp")
+buff.Irwin.2 <-readOGR(dsn="/Users/danifreund/Desktop/fishing_data_code_for_publication/wolves_fishing/data/waterway_buffers/irwin_creek_20m_buffer/IrwinCreek20Buffer.shp")
+buff.Daley.2 <-readOGR(dsn="/Users/danifreund/Desktop/fishing_data_code_for_publication/wolves_fishing/data/waterway_buffers/daley_creek_20m_buffer/daley.Creek.Buffer.20.shp")
+buff.Black.2 <- readOGR(dsn="/Users/danifreund/Desktop/fishing_data_code_for_publication/wolves_fishing/data/waterway_buffers/black_duck_river_20m_buffer/black.Duck.River.Buffer.20.shp")
+
+buff.Ash.5 <-readOGR(dsn="/Users/danifreund/Desktop/fishing_data_code_for_publication/wolves_fishing/data/waterway_buffers/ash_river_500m_buffer/AshRiver500Buffer.shp")
+buff.Irwin.5 <-readOGR(dsn="/Users/danifreund/Desktop/fishing_data_code_for_publication/wolves_fishing/data/waterway_buffers/irwin_creek_500m_buffer/irwin.Creek.Buffer.500m.shp")
+buff.Daley.5 <-readOGR(dsn="/Users/danifreund/Desktop/fishing_data_code_for_publication/wolves_fishing/data/waterway_buffers/daley_creek_500m_buffer/daley.Creek.Buffer.500.shp")
+buff.Black.5 <- readOGR(dsn="/Users/danifreund/Desktop/fishing_data_code_for_publication/wolves_fishing/data/waterway_buffers/black_duck_river_500m_buffer/black.Duck.River.Buffer.500.shp")
+```
+
+### Summarizing Entire Data Set
+
+```{r}
+locations$date<-as.Date(locations$date) # need this to do calculations with dates
+
+# getting max/min dates for entire data set for each wolf 
+#use the tidyverse functions (specifically functions from dplyr package) to summarize data in a variety of ways
+#note: the group_by() functions groups the data by wolf and then by date for each wolf.
+locations.all.data<-locations %>% group_by(wolf) %>% 
+    summarize(numberLocations = n(), #counts up the number of rows (i.e., locations) #"numberLocations" is the column name that the count data goes in
+              start = min(date), #selects the earliest date
+              end = max(date), #selects the latest date
+              length = max(date)-min(date)) #time between the two
+
+locations.all.data %>% kbl() %>% kable_material_dark(c("striped", "hover"))
+```
+
+### Cleaning Data
+
+```{r}
+O0C.during.min = '2021-05-26' %>% as.Date()
+O0C.during.max = "2021-07-07" %>% as.Date()
+
+V046.during.min = "2017-04-21" %>% as.Date()
+V046.during.max = "2017-05-16" %>% as.Date()
+
+V060.during.min = "2018-05-12" %>% as.Date()
+V060.during.max = "2018-05-18" %>% as.Date()
+
+V062.during.min = "2018-05-09" %>% as.Date()
+V062.during.max = "2018-05-25" %>% as.Date()
+
+V071.during.min = "2021-04-24" %>% as.Date()
+V071.during.max = "2021-05-17" %>% as.Date()
+  
+V077.during.min = "2020-05-19" %>% as.Date()
+V077.during.max = "2020-05-29" %>% as.Date()
+  
+V089.during.min = "2020-05-20" %>% as.Date() # changed to just using camera collar data
+V089.during.max = "2020-05-28" %>% as.Date()
+  
+V094.during.min = "2021-05-02" %>% as.Date()
+V094.during.max = "2021-05-09" %>% as.Date()
+
+V034.during.min = "2017-04-17" %>% as.Date()
+V034.during.max = "2017-05-17" %>% as.Date()
+
+# finding before and after periods
+before.period = function(min,max){
+          length=max-min
+          before=min-length
+}
+after.period = function(min,max){
+        length=max-min
+        after=max+length
+}
+
+O0C.before=before.period(O0C.during.min,O0C.during.max)
+O0C.after=after.period(O0C.during.min,O0C.during.max)
+
+V046.before=before.period(V046.during.min,V046.during.max)
+V046.after=after.period(V046.during.min,V046.during.max)
+
+V060.before=before.period(V060.during.min,V060.during.max)
+V060.after=after.period(V060.during.min,V060.during.max)
+
+V062.before=before.period(V062.during.min,V062.during.max)
+V062.after=after.period(V062.during.min,V062.during.max)
+
+V071.before=before.period(V071.during.min,V071.during.max)
+V071.after=after.period(V071.during.min,V071.during.max)
+
+V077.before=before.period(V077.during.min,V077.during.max)
+V077.after=after.period(V077.during.min,V077.during.max)
+
+V089.before=before.period(V089.during.min,V089.during.max)
+V089.after=after.period(V089.during.min,V089.during.max)
+
+V094.before=before.period(V094.during.min,V094.during.max)
+V094.after=after.period(V094.during.min,V094.during.max)
+
+V034.before=before.period(V034.during.min,V034.during.max)
+V034.after=after.period(V034.during.min,V034.during.max)
+
+# filtering out periods
+# for functions to filter wolfID properly, need to but ' ' in the call to function, not when writing the function
+filter.period = function(data,wolfID,min,max){
+  wolf=filter(data, wolf==wolfID & date >= min & date <= max)}
+
+O0C.during.period = filter.period(locations, 'O0C', O0C.during.min, O0C.during.max) %>% mutate(period='during')
+O0C.after.period = filter.period(locations, 'O0C', O0C.during.max, O0C.after) %>% mutate(period='after')
+# O0C doesn't have an after period
+
+V046.before.period = filter.period(locations, 'V046', V046.before, V046.during.min) %>% mutate(period='before')
+V046.during.period = filter.period(locations, 'V046', V046.during.min, V046.during.max) %>% mutate(period='during')
+V046.after.period = filter.period(locations, 'V046', V046.during.max, V046.after) %>% mutate(period='after')
+
+V060.before.period = filter.period(locations, 'V060', V060.before, V060.during.min) %>% mutate(period='before')
+V060.during.period = filter.period(locations, 'V060', V060.during.min, V060.during.max) %>% mutate(period='during')
+V060.after.period = filter.period(locations, 'V060', V060.during.max, V060.after) %>% mutate(period='after')
+
+V062.before.period = filter.period(locations, 'V062', V062.before, V062.during.min) %>% mutate(period='before')
+V062.during.period = filter.period(locations, 'V062', V062.during.min, V062.during.max) %>% mutate(period='during')
+V062.after.period = filter.period(locations, 'V062', V062.during.max, V062.after) %>% mutate(period='after')
+
+V071.before.period = filter.period(locations, 'V071', V071.before, V071.during.min) %>% mutate(period='before')
+V071.during.period = filter.period(locations, 'V071', V071.during.min, V071.during.max) %>% mutate(period='during')
+V071.after.period = filter.period(locations, 'V071', V071.during.max, V071.after) %>% mutate(period='after')
+
+V077.before.period = filter.period(locations, 'V077', V077.before, V077.during.min) %>% mutate(period='before')
+V077.during.period = filter.period(locations, 'V077', V077.during.min, V077.during.max) %>% mutate(period='during')
+V077.after.period = filter.period(locations, 'V077', V077.during.max, V077.after) %>% mutate(period='after')
+
+V089.before.period = filter.period(locations, 'V089', V089.before, V089.during.min) %>% mutate(period='before')
+V089.during.period = filter.period(locations, 'V089', V089.during.min, V089.during.max) %>% mutate(period='during')
+V089.after.period = filter.period(locations, 'V089', V089.during.max, V089.after) %>% mutate(period='after')
+
+V094.before.period = filter.period(locations, 'V094', V094.before, V094.during.min) %>% mutate(period='before')
+V094.during.period = filter.period(locations, 'V094', V094.during.min, V094.during.max) %>% mutate(period='during')
+V094.after.period = filter.period(locations, 'V094', V094.during.max, V094.after) %>% mutate(period='after')
+
+V034.before.period = filter.period(locations, 'V034', V034.before, V034.during.min) %>% mutate(period='before')
+V034.during.period = filter.period(locations, 'V034', V034.during.min, V034.during.max) %>% mutate(period='during')
+V034.after.period = filter.period(locations, 'V034', V034.during.max, V034.after) %>% mutate(period='after')
+
+fishing.periods.summary = rbind(O0C.during.period, O0C.after.period,
+                                V046.before.period, V046.during.period, V046.after.period,
+                                V060.before.period, V060.during.period, V060.after.period,
+                                V062.before.period, V062.during.period, V062.after.period,
+                                V071.before.period, V071.during.period, V071.after.period,
+                                V077.before.period, V077.during.period, V077.after.period,
+                                V089.before.period, V089.during.period, V089.after.period,
+                                V094.before.period, V094.during.period, V094.after.period,
+                                V034.before.period, V034.during.period, V034.after.period) %>% 
+  mutate(river ='NA', buffer='none')
+
+write.csv(fishing.periods.summary,"/Users/danifreund/Desktop/fishing_data_code_for_publication/ethology_of_wolves_freshwater_fishing/data/all.locs.fishing.period.no.buffers.csv")
+
+############### FILTERING OUT WOLF LOCATIONS BY EACH WOLF'S RESPECTIVE BUFFER
+
+filter.by.buff=function(data,wolfID,buffer){
+  filter.locs=filter(data, wolf==wolfID)
+  coordinates(filter.locs) <- ~longitude.Deg + latitude.Deg #'WGS 84 LONGITUDE is before LATITUDE!!!!
+  proj4string(filter.locs) <- CRS("+init=epsg:4326")
+  filter.locs<-spTransform(filter.locs, CRS(proj4string(buffer))) # converts locations to UTM
+  buff.locs<-filter.locs[buffer,] 
+  plot(buff.locs, col='red') 
+  plot(buffer, add=T) 
+  data.frame(buff.locs)}
+
+O0C.ash.5 = filter.by.buff(fishing.periods.summary,'O0C', buff.Ash.5) %>% mutate(river = "ash", buffer= "500")
+O0C.ash.2 = filter.by.buff(fishing.periods.summary,'O0C', buff.Ash.2) %>% mutate(river = "ash", buffer= "20")
+O0C.black.5 = filter.by.buff(fishing.periods.summary,'O0C', buff.Black.5) %>% mutate(river = "black", buffer= "500")
+O0C.black.2 = filter.by.buff(fishing.periods.summary,'O0C', buff.Black.2) %>% mutate(river = "black", buffer= "20")
+
+V046.irwin.5 = filter.by.buff(fishing.periods.summary,'V046', buff.Irwin.5) %>% mutate(river = "irwin", buffer= "500")
+V046.irwin.2 = filter.by.buff(fishing.periods.summary,'V046', buff.Irwin.2) %>% mutate(river = "irwin", buffer= "20")
+
+V060.irwin.5 = filter.by.buff(fishing.periods.summary,'V060', buff.Irwin.5) %>% mutate(river = "irwin", buffer= "500")
+V060.irwin.2 = filter.by.buff(fishing.periods.summary,'V060', buff.Irwin.2) %>% mutate(river = "irwin", buffer= "20")
+
+V062.irwin.5 = filter.by.buff(fishing.periods.summary,'V062', buff.Irwin.5) %>% mutate(river = "irwin", buffer= "500")
+V062.irwin.2 = filter.by.buff(fishing.periods.summary,'V062', buff.Irwin.2) %>% mutate(river = "irwin", buffer= "20")
+
+V071.daley.5 = filter.by.buff(fishing.periods.summary,'V071', buff.Daley.5) %>% mutate(river = "daley", buffer= "500")
+V071.daley.2 = filter.by.buff(fishing.periods.summary,'V071', buff.Daley.2) %>% mutate(river = "daley", buffer= "20")
+
+V077.ash.5 = filter.by.buff(fishing.periods.summary,'V077', buff.Ash.5) %>% mutate(river = "ash", buffer= "500")
+V077.ash.2 = filter.by.buff(fishing.periods.summary,'V077', buff.Ash.2) %>% mutate(river = "ash", buffer= "20")
+
+V089.ash.5 = filter.by.buff(fishing.periods.summary,'V089', buff.Ash.5) %>% mutate(river = "ash", buffer= "500")
+V089.ash.2 = filter.by.buff(fishing.periods.summary,'V089', buff.Ash.2) %>% mutate(river = "ash", buffer= "20")
+
+V094.irwin.5 = filter.by.buff(fishing.periods.summary,'V094', buff.Irwin.5) %>% mutate(river = "irwin", buffer= "500")
+V094.irwin.2 = filter.by.buff(fishing.periods.summary,'V094', buff.Irwin.2) %>% mutate(river = "irwin", buffer= "20")
+
+# don't have to specify year here because it will capture both 2017 and 2019
+V034.irwin.5 = filter.by.buff(fishing.periods.summary,'V034', buff.Irwin.5) %>% mutate(river = "irwin", buffer= "500")
+V034.irwin.2 = filter.by.buff(fishing.periods.summary,'V034', buff.Irwin.2) %>% mutate(river = "irwin", buffer= "20")
+
+summary.locs.buffered = rbind(O0C.ash.5, O0C.ash.2, O0C.black.5, O0C.black.2, 
+                              V046.irwin.5, V046.irwin.2, 
+                              V060.irwin.5, V060.irwin.2,
+                              V062.irwin.5, V062.irwin.2, 
+                              V071.daley.5, V071.daley.2, 
+                              V077.ash.5, V077.ash.2, 
+                              V089.ash.5, V089.ash.2, 
+                              V094.irwin.5, V094.irwin.2,
+                              V034.irwin.5, V034.irwin.2)
+
+# checking to make sure it worked
+summary.locs.buffered %>% subset(period == "during") %>% group_by(wolf,river,buffer) %>% summarize(start=min(date),end=max(date)) %>% kbl() %>% kable_material_dark(c("striped", "hover"))
+
+# saving out csv
+write.csv(summary.locs.buffered, "/Users/danifreund/Desktop/fishing_data_code_for_publication/wolves_fishing/data/locations_by_fishing_period.csv")
+```
+
+V060 had a 12hour collar, so the location dates do not match up with the camera trap dates that were used to define their fishing period. However, all location dates in this data set are within the fishing period dates from the camera trap dates used to define the fishing period.
